@@ -9,6 +9,7 @@ import {
   RECIPES,
   TOP_ODDS,
   WEAPONS,
+  canTurn,
   cls,
   isBaseRecipe,
   isSuper,
@@ -111,6 +112,9 @@ const LOCKS = Object.entries(CELL_LOCKS).map(([k, lock]) => {
   return { c, r, lock };
 });
 
+const AUTO_KEY = 'bunny-brigade-auto';
+const BEST_KM_KEY = 'bunny-brigade-best-km';
+
 /** Ties the battle and the backpack grid together and handles taps, drags, merges, evolutions and cases. */
 export class Game {
   econ: Econ = { cash: BAL.startCash, gems: BAL.startGems };
@@ -134,6 +138,20 @@ export class Game {
   press: { r: Rect; t: number } | null = null;
   cashBump = 0;
   gemBump = 0;
+  /**
+   * AUTO battle (saved): a wave starts by itself after BAL.autoStart seconds of prep nobody is using, the carrot
+   * airstrike drops itself on the biggest crowd of foxes, and the squads leave for the next street on their own.
+   */
+  auto = false;
+  /** Seconds of untouched prep counted towards the auto start. */
+  autoWait = 0;
+  /** The distance counter as shown: rolls up towards battle.km. */
+  kmShown = 0;
+  kmBump = 0;
+  /** The longest distance ever run (saved). */
+  bestKm = 0;
+  private lastKm = 0;
+  private bestKmDirty = false;
   // cases
   case: CaseRun | null = null;
   cases = 0; // cash cases opened (their price climbs)
@@ -173,6 +191,7 @@ export class Game {
 
   constructor() {
     this.loadEvo();
+    this.loadPrefs();
     this.inv.place(makeItem('rabbit'), 1, 1);
     this.inv.place(makeItem('knife'), 2, 1);
     this.inv.place(makeItem('pistol'), 2, 2);
@@ -315,6 +334,7 @@ export class Game {
     this.updateCase(dt);
     this.cashBump = Math.max(0, this.cashBump - dt * 4);
     this.gemBump = Math.max(0, this.gemBump - dt * 4);
+    this.updateKm(dt);
     this.powerBump = Math.max(0, this.powerBump - dt * 3);
     this.powerShown += (this.power - this.powerShown) * Math.min(1, dt * 5);
     if (Math.abs(this.power - this.powerShown) < 0.5) this.powerShown = this.power;
@@ -338,6 +358,7 @@ export class Game {
     music.set(ph === 'fight' ? (this.battle.isBossWave ? 'boss' : 'fight') : ph === 'victory' || ph === 'travel' || ph === 'defeat' ? ph : 'prep');
     music.muffle(!!(this.case || this.evo || this.paused || this.showStats));
     if (this.paused || this.showStats) return;
+    this.updateAuto(dt);
     // slow motion on big moments (boss knock-out, multi kills, evolutions, rare cases), counted in real time
     const slow = this.battle.slowmo > 0;
     this.battle.slowmo = Math.max(0, this.battle.slowmo - dt);
@@ -381,11 +402,106 @@ export class Game {
         this.gemsFlown = true;
         sfx.play('gems');
         const n = Math.min(12, b.lastReward);
-        for (let i = 0; i < n; i++) this.winFx.gem(W / 2 + rand(-30, 30), L.endPanel.y + 250, L.gems.x + L.gems.w - 22, L.gems.y + L.gems.h / 2, i * 0.06);
+        for (let i = 0; i < n; i++) this.winFx.gem(W / 2 - 70 + rand(-30, 30), L.endPanel.y + 250, L.gems.x + L.gems.w - 22, L.gems.y + L.gems.h / 2, i * 0.06);
       }
       if (this.winT >= 3.8) this.creditGems();
     }
     this.lastPhase = phase;
+  }
+
+  /** The distance counter rolls up to the battle's kilometres, bumps when a wave pays some, and keeps the record. */
+  private updateKm(dt: number) {
+    const b = this.battle;
+    this.kmBump = Math.max(0, this.kmBump - dt * 3);
+    if (b.km > this.lastKm + 0.3 && b.phase !== 'travel') this.kmBump = 1;
+    this.lastKm = b.km;
+    this.kmShown = b.phase === 'travel' ? b.km : this.kmShown + (b.km - this.kmShown) * Math.min(1, dt * 4);
+    if (Math.abs(b.km - this.kmShown) < 0.05) this.kmShown = b.km;
+    if (b.km > this.bestKm + 1e-6) {
+      this.bestKm = b.km;
+      this.bestKmDirty = true;
+    }
+    if (this.bestKmDirty && b.phase !== 'travel') {
+      this.bestKmDirty = false;
+      try {
+        localStorage.setItem(BEST_KM_KEY, this.bestKm.toFixed(1));
+      } catch {
+        /* storage blocked: the record lasts this session only */
+      }
+    }
+  }
+
+  /** Seconds left before an AUTO wave starts (shown on the START button). */
+  get autoLeft() {
+    return Math.max(0, BAL.autoStart - this.autoWait);
+  }
+
+  toggleAuto() {
+    this.auto = !this.auto;
+    this.autoWait = 0;
+    try {
+      localStorage.setItem(AUTO_KEY, this.auto ? '1' : '0');
+    } catch {
+      /* storage blocked: AUTO lasts this session only */
+    }
+  }
+
+  /** AUTO battle: start the wave after an untouched prep, drop the airstrike on the biggest crowd, move on after a stage. */
+  private updateAuto(dt: number) {
+    const b = this.battle;
+    if (!this.auto) {
+      this.autoWait = 0;
+      return;
+    }
+    if (b.phase === 'prep' && !this.drag && !this.case && !this.evo && this.power > 0) {
+      // (with no squad on the road it waits: a wave started then could only be lost)
+      this.autoWait += dt;
+      if (this.autoWait >= BAL.autoStart && b.startWave()) {
+        this.autoWait = 0;
+        this.panelShake = 0;
+        this.waveStartT = this.time;
+      }
+    } else if (b.phase !== 'prep') this.autoWait = 0;
+    if (b.bombReady) {
+      const spot = this.bombSpot();
+      if (spot) b.dropBomb(spot.x, spot.y);
+    }
+    if (b.phase === 'victory' && !this.case && !this.evo && this.winT >= this.winReady + BAL.autoStart) b.startTravel();
+  }
+
+  /** Where the airstrike hurts most: the fox with the most foxes around it (3 or more, or Big Red), on screen. */
+  private bombSpot(): { x: number; y: number } | null {
+    const foxes = this.battle.units.filter((u) => u.side === 'fox' && !u.dead && u.x > 30 && u.x < W - 30);
+    const r2 = (BAL.bombAoe * 0.8) ** 2;
+    let best: { x: number; y: number } | null = null;
+    let bestN = 2;
+    for (const f of foxes) {
+      let n = f.kind === 'boss' ? 3 : 0;
+      let sx = 0;
+      let sy = 0;
+      let k = 0;
+      for (const o of foxes) {
+        if ((o.x - f.x) ** 2 + (o.y - f.y) ** 2 > r2) continue;
+        n++;
+        sx += o.x;
+        sy += o.y;
+        k++;
+      }
+      if (n > bestN) {
+        bestN = n;
+        best = { x: sx / k, y: sy / k };
+      }
+    }
+    return best;
+  }
+
+  private loadPrefs() {
+    try {
+      this.auto = localStorage.getItem(AUTO_KEY) === '1';
+      this.bestKm = Number(localStorage.getItem(BEST_KM_KEY)) || 0;
+    } catch {
+      /* storage blocked: defaults */
+    }
   }
 
   private creditGems() {
@@ -509,8 +625,8 @@ export class Game {
       this.inv.tray[i] = d.item;
       return;
     }
-    // never lose a piece: last resort, the best free grid spot
-    const s = this.inv.bestSpot(d.item);
+    // never lose a piece: last resort, the best free grid spot (turned only if it fits no other way)
+    const s = this.inv.bestSpot(d.item, true);
     if (s) {
       d.item.w = s.w;
       d.item.h = s.h;
@@ -791,7 +907,7 @@ export class Game {
       const r = trayRect(slot);
       this.uiFx.burst(r.x + r.w / 2, r.y + r.h / 2, TIER.metalLight[card.level - 1], 12);
     } else {
-      const s = this.inv.bestSpot(item);
+      const s = this.inv.bestSpot(item, true);
       if (s) {
         item.w = s.w;
         item.h = s.h;
@@ -958,7 +1074,7 @@ export class Game {
       let w = main.w;
       let h = main.h;
       let spot = otherSpot ? this.inv.spotNear(w, h, otherSpot.col, otherSpot.row, ow, oh) : null;
-      if (!spot && otherSpot && w !== h) {
+      if (!spot && otherSpot && w !== h && canTurn(main.type)) {
         spot = this.inv.spotNear(h, w, otherSpot.col, otherSpot.row, ow, oh);
         if (spot) [w, h] = [h, w];
       }
@@ -1074,6 +1190,8 @@ export class Game {
       this.speed = this.speed === 1 ? 2 : 1;
       return;
     }
+    if (hit(L.auto)) return this.toggleAuto();
+    this.autoWait = 0; // any other tap in prep gives the player the full countdown again
     if (hit(L.caseBtn)) return void this.openCase('basic');
     if (hit(L.eliteBtn)) return void this.openCase('elite');
     if (hit(L.mute)) {
@@ -1158,7 +1276,12 @@ export class Game {
       // a tap: rotate a grid piece, or put a tray piece where it helps most
       this.drag = null;
       if (d.from === 'grid') {
-        if (it.w !== it.h && this.tryRotate(it, d.col, d.row)) {
+        if (!canTurn(it.type)) {
+          // rabbits always stand up: a tap just makes them hop
+          this.inv.place(it, d.col, d.row);
+          this.pop(it);
+          sfx.play('pick');
+        } else if (it.w !== it.h && this.tryRotate(it, d.col, d.row)) {
           this.pop(it);
           sfx.play('drop');
           this.syncArmy();
@@ -1177,7 +1300,8 @@ export class Game {
           this.syncArmy();
         } else {
           this.inv.tray[d.trayIndex] = it;
-          this.refuse('Grid is full');
+          // auto-place keeps the shape the piece has in the tray: say so when only the other way round would fit
+          this.refuse(this.inv.bestSpot(it, true) ? 'No room this way round' : 'Grid is full');
         }
       }
       return;

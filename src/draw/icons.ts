@@ -1,5 +1,5 @@
-import { COLOR } from '../theme';
-import { circle, ellipse, fillStroke, poly, rr, type Ctx } from '../util';
+import { COLOR, FONT } from '../theme';
+import { circle, ellipse, fillStroke, label, poly, rr, type Ctx } from '../util';
 
 const INK = COLOR.ink;
 
@@ -33,6 +33,39 @@ export function drawCarrot(ctx: Ctx, x: number, y: number, s = 1, rot = 0) {
   ctx.lineTo(0, 8);
   ctx.stroke();
   ctx.restore();
+}
+
+/** 1234 -> "1234", 56789 -> "56.8K", 5158598750 -> "5.2B": big numbers kept short enough for a button. */
+export function shortNumber(n: number) {
+  const r = Math.round(n);
+  if (r < 10000) return String(r);
+  for (const [d, u] of [
+    [1e12, 'T'],
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ] as const) {
+    if (r >= d) return `${(r / d).toFixed(r / d < 100 ? 1 : 0)}${u}`;
+  }
+  return String(r);
+}
+
+/**
+ * "<before> [carrot] <value>" as one line centred on x, in the game font with the ink outline: how the game
+ * writes army power (the carrot number of the power tab), e.g. "RECOMMENDED [carrot] 190".
+ */
+export function carrotText(ctx: Ctx, before: string, value: number, x: number, y: number, size: number, color: string = COLOR.white) {
+  ctx.font = `${Math.round(size)}px ${FONT}`;
+  const pre = before ? `${before} ` : '';
+  const num = shortNumber(value);
+  const preW = pre ? ctx.measureText(pre).width : 0;
+  const icon = size * 0.95;
+  const total = preW + icon + ctx.measureText(num).width;
+  let lx = x - total / 2;
+  if (pre) label(ctx, pre, lx, y, size, { align: 'left', color, lw: Math.max(3, size * 0.24) });
+  lx += preW;
+  drawCarrot(ctx, lx + icon * 0.42, y + size * 0.05, size / 24, 0.45);
+  label(ctx, num, lx + icon, y, size, { align: 'left', color, lw: Math.max(3, size * 0.24) });
 }
 
 export function drawCash(ctx: Ctx, x: number, y: number, s = 1) {

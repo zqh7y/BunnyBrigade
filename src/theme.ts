@@ -17,6 +17,10 @@ export const COLOR = {
   toast: '#ffe27a',
 
   hudPill: 'rgba(36, 32, 46, 0.8)',
+  // the top bar (money, wave bar, gems, stage plate): candy bodies in the dark of the old money / gem pills
+  hud: '#24202e',
+  hudDark: '#141119',
+  hudWell: '#0e0b13',
   cash: '#5fd16f',
   cashDark: '#2f9a48',
   gem: '#b94dff',
@@ -32,9 +36,6 @@ export const COLOR = {
   bannerBoss: '#ff5a4f',
   // the wave tracker (top centre)
   hereFill: '#fff7e0',
-  waveBar: '#3f4373',
-  waveBarDark: '#262949',
-  waveSocket: '#1b1830',
   waveChipDark: '#d9821c',
   stageTab: '#ffd23a',
   stageTabDark: '#d99a12',
@@ -111,9 +112,11 @@ export const L = {
 
   cash: { x: 12, y: 16, w: 132, h: 46 },
   gems: { x: 396, y: 16, w: 132, h: 46 },
-  wave: { x: 154, y: 12, w: 232, h: 92 },
+  wave: { x: 154, y: 16, w: 232, h: 46 }, // the wave bar: same top and height as the money and gem pills
   pause: { x: 14, y: 74, w: 56, h: 56 },
   speed: { x: 470, y: 74, w: 56, h: 56 },
+  auto: { x: 470, y: 138, w: 56, h: 56 }, // AUTO battle toggle, under x2
+  km: { x: 14, y: 138, w: 56, h: 56 }, // the distance run (the goal), under pause
   baseHp: { x: 14, y: 328, w: 112, h: 12 }, // the bar; number and carrot sit above it
   bomb: { x: 154, y: 326, r: 18 }, // airstrike charge indicator
   comboY: 196,

@@ -1,5 +1,5 @@
 import { sfx } from '../audio';
-import { CLEAR_DUR, type Battle } from '../battle';
+import { CLEAR_DUR, TRAVEL, type Battle } from '../battle';
 import {
   AWAKEN_LEVEL,
   BAL,
@@ -20,6 +20,7 @@ import {
   itemSellValue,
   rabbitStats,
   recipeOf,
+  recommendedPower,
   recipesUsing,
   streetOf,
   type CaseKind,
@@ -33,6 +34,7 @@ import { circle, clamp, easeOutBack, fillStroke, hash, label, line, poly, rr, st
 import { drawRabbit, RABBIT_BOX } from './characters';
 import { drawGearIcon, drawLock } from './gear';
 import {
+  carrotText,
   drawCarrot,
   drawCash,
   drawChart,
@@ -72,17 +74,17 @@ function bumpLabel(ctx: Ctx, s: string, x: number, y: number, size: number, bump
 }
 
 /**
- * A money / gem counter in a top corner, built from the wave bar's parts: a navy candy body (btn3d), a recessed
+ * A money / gem counter in a top corner, built from the wave bar's parts: a dark candy body (btn3d), a recessed
  * dark window holding the number, and the currency icon at the outer end (`iconSide`), where coins and gems fly to.
  * The number shrinks to fit the window, bumps gold on a gain (bumpLabel) and the window flashes white, like the
  * wave chip on a knock-out. Returns the face's centre y, for the icon.
  */
 function currencyPill(ctx: Ctx, r: Rect, value: number, bump: number, iconSide: 'left' | 'right') {
-  const cy = btn3d(ctx, r, COLOR.waveBar, COLOR.waveBarDark, 16);
+  const cy = btn3d(ctx, r, COLOR.hud, COLOR.hudDark, 16);
   const iconW = 42; // the end of the body the icon sits on
   const win = { x: iconSide === 'left' ? r.x + iconW : r.x + 5, y: cy - 15, w: r.w - iconW - 5, h: 30 };
   rr(ctx, win.x, win.y, win.w, win.h, 11);
-  fillStroke(ctx, COLOR.waveSocket, 2.5);
+  fillStroke(ctx, COLOR.hudWell, 2.5);
   rr(ctx, win.x + 2, win.y + 2, win.w - 4, 5, 3);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.fill();
@@ -234,52 +236,32 @@ export function classFx(ctx: Ctx, level: number, r: Rect, k: number, t: number, 
 // ---------------------------------------------------------------- top HUD
 
 /*
- * THE STAGE BAR: "CANDY 3D", built from the same parts as the game's buttons
+ * THE TOP BAR: money pill | wave bar | gem pill, one row of dark candy bodies (btn3d in COLOR.hud, the dark of
+ * the old money / gem pills), all at the same top and height (L.cash, L.wave, L.gems). Under the wave bar hangs
+ * the stage plate:
  *
- * Why the old one looked unfit: it was a flat dark plate with thin pips and a thin bar, a "dashboard" look,
- * while everything else the player touches (START WAVE, CASE, ELITE, pause, x2, stats, sell) is a chunky
- * btn3d candy button with an ink outline, a darker bottom lip and a glossy top.
- *
- * This version is built from those same parts, as one toy-like object hanging from the top of the screen:
- *
- *   [ STAGE 3 ]           gold candy tab (the gold of the active x2 button), plugged in behind the bar,
- *  (#|#|#|[4 ]| | | | |(fox))  the bar itself is a btn3d in the navy of the pause / mute buttons
- *     ( fox 12 FOXES LEFT )    a navy status drawer tucked under the bar's lip
+ *  ($ 120 )  (#|#|[3 ]| | | | | |(fox))  ( 15 gem)
+ *               ( [STAGE 3]  WAVE 3/10 )     big: which stage and which wave
+ *               (   fox 6 FOXES LEFT   )     what is happening now
  *
  * - The bar holds a recessed dark track with 9 chunky candy chips (waves 1-9) and ends in a big red candy
  *   CAP (wave 10, the boss) with the white fox badge, the same red as the BOSS WAVE button.
  * - Cleared waves are solid orange candy chips (COLOR.progress / progressLight, like the CASE button) with a
  *   darker lip and a gloss line; a glint sweeps across the filled chips every few seconds.
- * - The current wave's chip is WIDE (2.6x the others) and carries the wave number, so "you are here"
- *   reads at a glance even on a phone. During the fight it fills left to right with the wave's progress
- *   (eased, so each knock-out slides the fill instead of jumping), flashes white on every knock-out, glows and
- *   has a pulsing cream outline. When the wave is cleared it stamps (scale 1.5 -> 1 with overshoot) and
- *   throws sparkles; when prep starts the wide slot slides over to the next chip (widths ease between waves).
- * - Ahead waves are empty recessed sockets.
- * - The boss cap: idle it peeks (a small wiggle every few seconds); when the boss wave is next or being
- *   fought it pulses with a red glow, the bar gets a red halo and the cap shows the wave progress as an
- *   orange ring round the fox; once the stage is cleared it turns gold with a white check that pops in after
- *   a ripple has hopped along all the chips.
- * - The drawer under the bar says what is happening now: "WAVE 4 · GET READY", fox icon + "12 FOXES LEFT"
- *   (the number bumps gold on each knock-out, exactly like the cash counter), "WAVE 4 CLEAR!" (pops in),
- *   "STAGE CLEAR!", "ON THE MOVE", "WAVE 7 LOST". Its width eases to fit the text.
- * - The STAGE tab pops when the stage number changes. A small twinkle visits its corner now and then.
+ * - The current wave's chip is WIDE (2.6x the others) and carries the wave number. During the fight it fills
+ *   left to right with the wave's progress (eased), flashes white on every knock-out, glows and has a pulsing
+ *   cream outline. When the wave is cleared it stamps and throws sparkles; when prep starts the wide slot
+ *   slides over to the next chip (widths ease between waves).
+ * - The boss cap: idle it peeks; when the boss wave is next or being fought it pulses with a red glow, the bar
+ *   gets a red halo and the cap shows the wave progress as an orange ring; once the stage is cleared it turns
+ *   gold with a white check.
+ * - The stage plate's first line is the gold STAGE chip (it pops when the stage changes, a twinkle visits its
+ *   corner) and "WAVE 3/10" (or "BOSS WAVE"), 20 px. The second line says what is happening now: "GET READY",
+ *   fox icon + "12 FOXES LEFT" (the number bumps gold on each knock-out), "WAVE 4 CLEAR!" (pops in),
+ *   "STAGE CLEAR!", "ON THE MOVE", "WAVE 7 LOST". The plate's width eases to fit.
  *
- * Size: x 154..386 (L.wave), y 12..104. Text: tab 17 px, chip number 15 px, drawer 14 px (all >= 13).
- * The cash / gems pills and drawHud are untouched (they keep calling waveTracker(ctx, g.battle, g.time)).
- * Uses only identifiers already imported in ui.ts (btn3d and bumpLabel are defined in ui.ts itself).
  * Module-level state (WT) only remembers eased widths / fill and the times things changed, for the animations.
  */
-
-// NEW COLOR TOKENS
-//   waveBar: '#3f4373',
-//   waveBarDark: '#262949',
-//   waveSocket: '#1b1830',
-//   waveChipDark: '#d9821c',
-//   stageTab: '#ffd23a',
-//   stageTabDark: '#d99a12',
-//   bossCapDark: '#c23a32',
-//   bossText: '#ffb0a8',
 
 /** Frame-to-frame memory of the wave tracker: eased chip widths, fill and drawer width, and when things changed. */
 const WT = {
@@ -296,9 +278,9 @@ const WT = {
 type CapState = 'ahead' | 'next' | 'fight' | 'done';
 
 /**
- * Top centre: the stage at a glance, as a candy toy. A gold STAGE tab, a raised navy bar with one candy chip per
- * wave (cleared ones solid orange, the current one wide with its number and filling up, the boss wave a red cap
- * with the fox badge at the end) and a drawer under it saying what is happening now.
+ * Top centre: the stage at a glance, as a candy toy. A raised dark bar with one candy chip per wave (cleared ones
+ * solid orange, the current one wide with its number and filling up, the boss wave a red cap with the fox badge at
+ * the end) and the stage plate under it: STAGE and WAVE in big letters, then what is happening now.
  */
 function waveTracker(ctx: Ctx, b: Battle, t: number) {
   const r = L.wave;
@@ -328,8 +310,8 @@ function waveTracker(ctx: Ctx, b: Battle, t: number) {
   const bump = clamp(1 - (t - WT.bumpAt) / 0.25, 0, 1);
 
   // ---- geometry
-  const bar = { x: r.x, y: r.y + 22, w: r.w, h: 46 }; // face y 34..74, lip to 80
-  const cy = bar.y + (bar.h - 6) / 2; // 54: middle of the bar's face
+  const bar = { x: r.x, y: r.y, w: r.w, h: r.h }; // face y 16..56, lip to 62: level with the money and gem pills
+  const cy = bar.y + (bar.h - 6) / 2; // 36: middle of the bar's face
   const capR = 23;
   const capX = bar.x + bar.w - 24; // 362
   const track = { x: bar.x + 7, y: cy - 13, w: capX - bar.x - 2, h: 26 }; // runs on under the cap
@@ -341,33 +323,10 @@ function waveTracker(ctx: Ctx, b: Battle, t: number) {
   if (WT.widths.length !== segs) WT.widths = Array.from({ length: segs }, () => unit);
   for (let i = 0; i < segs; i++) WT.widths[i] += (unit * (i === wide ? 2.6 : 1) - WT.widths[i]) * ease;
 
-  // ---- the status drawer, tucked under the bar's lip
-  waveDrawer(ctx, b, left, bump, t, ease, bar.y + bar.h);
+  // ---- the stage plate, tucked under the bar's lip
+  stagePlate(ctx, b, left, bump, t, ease, bar.y + bar.h);
 
-  // ---- the STAGE tab, plugged in behind the bar (it pops when the stage changes)
-  ctx.font = `17px ${FONT}`;
-  const stText = `STAGE ${b.stage}`;
-  const tw = Math.max(104, ctx.measureText(stText).width + 40);
-  const tab = { x: W / 2 - tw / 2, y: r.y, w: tw, h: 34 };
-  const tk = clamp((t - WT.stageAt) / 0.45, 0, 1);
-  const tabPop = 1 + 0.3 * (1 - easeOutBack(tk));
-  ctx.save();
-  ctx.translate(W / 2, bar.y);
-  ctx.scale(tabPop, tabPop);
-  ctx.translate(-W / 2, -bar.y);
-  btn3d(ctx, tab, COLOR.stageTab, COLOR.stageTabDark, 12);
-  label(ctx, stText, W / 2, tab.y + (bar.y - tab.y) / 2 + 1, 17, { lw: 4 });
-  const ph = (t / 2.7) % 1;
-  if (ph < 0.3) {
-    const a = Math.sin((ph / 0.3) * Math.PI);
-    ctx.globalAlpha *= a;
-    starPath(ctx, tab.x + tab.w - 12, tab.y + 8, 2.5 + 3.5 * a, 1.2, 4, t * 2);
-    ctx.fillStyle = CLASS_FX.spark;
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // ---- the bar: a btn3d in the pause button's navy (with a red halo while the boss wave is on)
+  // ---- the bar: a dark btn3d (with a red halo while the boss wave is on)
   if (bossOn && b.phase !== 'defeat') {
     ctx.save();
     ctx.shadowColor = COLOR.bannerBoss;
@@ -378,9 +337,9 @@ function waveTracker(ctx: Ctx, b: Battle, t: number) {
     ctx.fill();
     ctx.restore();
   }
-  btn3d(ctx, bar, COLOR.waveBar, COLOR.waveBarDark, 16);
+  btn3d(ctx, bar, COLOR.hud, COLOR.hudDark, 16);
   rr(ctx, track.x, track.y, track.w, track.h, 9);
-  fillStroke(ctx, COLOR.waveSocket, 2.5);
+  fillStroke(ctx, COLOR.hudWell, 2.5);
   rr(ctx, track.x + 2, track.y + 2, track.w - 4, 5, 3);
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.fill();
@@ -448,7 +407,7 @@ function waveTracker(ctx: Ctx, b: Battle, t: number) {
         const s = 1 + 0.25 * bump;
         ctx.translate(mx, y + h / 2 + 1);
         ctx.scale(s, s);
-        label(ctx, String(n), 0, 0, 15, { lw: 3.5 });
+        label(ctx, String(n), 0, 0, 17, { lw: 4 });
       }
     }
     ctx.restore();
@@ -597,18 +556,32 @@ function bossCap(ctx: Ctx, b: Battle, x: number, y: number, R: number, state: Ca
   ctx.restore();
 }
 
-/** The drawer under the bar: what is happening now (foxes left in a fight, GET READY, CLEAR...). */
-function waveDrawer(ctx: Ctx, b: Battle, left: number, bump: number, t: number, ease: number, top: number) {
-  const size = 14;
-  const ty = top + 12.5;
+/**
+ * The stage plate under the bar. Line 1, big: the gold STAGE chip (it pops when the stage changes) and
+ * "WAVE 3/10" (or BOSS WAVE). Line 2: what is happening now (foxes left in a fight, GET READY, CLEAR...).
+ */
+function stagePlate(ctx: Ctx, b: Battle, left: number, bump: number, t: number, ease: number, top: number) {
+  const last = BAL.wavesPerStage;
+  const cur = Math.min(last, b.wave);
+  const boss = cur === last;
+  const stText = `STAGE ${b.stage}`;
+  const waveText = boss ? 'BOSS WAVE' : `WAVE ${cur}/${last}`;
+  ctx.font = `17px ${FONT}`;
+  const chipW = ctx.measureText(stText).width + 24;
+  ctx.font = `20px ${FONT}`;
+  const waveW = ctx.measureText(waveText).width;
+  const line1W = chipW + 10 + waveW;
+
+  // line 2: what is happening now
+  const size = 15;
   let text = '';
   let color: string = COLOR.white;
   let pop = 0; // seconds since this text appeared, for the ones that stamp in
   let alpha = 1;
   const fight = b.phase === 'fight';
   if (b.phase === 'prep') {
-    text = b.isBossWave ? 'BOSS WAVE · GET READY' : `WAVE ${b.wave} · GET READY`;
-    if (b.isBossWave) {
+    text = boss ? 'BIG RED IS COMING!' : 'GET READY!';
+    if (boss) {
       color = COLOR.bossText;
       alpha = 0.75 + 0.25 * Math.sin(t * 6);
     }
@@ -631,32 +604,103 @@ function waveDrawer(ctx: Ctx, b: Battle, left: number, bump: number, t: number, 
   const num = String(left);
   const rest = left === 1 ? ' FOX LEFT' : ' FOXES LEFT';
   const numW = ctx.measureText(num).width;
-  const contentW = fight ? 22 + numW + ctx.measureText(rest).width : ctx.measureText(text).width;
-  const target = clamp(contentW + 32, 120, 228);
+  const line2W = fight ? 24 + numW + ctx.measureText(rest).width : ctx.measureText(text).width;
+
+  const target = clamp(Math.max(line1W, line2W) + 36, 200, 300);
   WT.tagW = WT.tagW > 0 ? WT.tagW + (target - WT.tagW) * ease : target;
   const w = WT.tagW;
-  rr(ctx, W / 2 - w / 2, top - 14, w, 38, 12);
-  fillStroke(ctx, COLOR.waveBarDark, 2.5);
-  rr(ctx, W / 2 - w / 2 + 3, top, w - 6, 4, 2);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  rr(ctx, W / 2 - w / 2, top - 12, w, 66, 14);
+  fillStroke(ctx, COLOR.hud, 2.5);
+  rr(ctx, W / 2 - w / 2 + 3, top, w - 6, 4, 2); // the bar's shadow on the plate
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.fill();
+
+  // line 1: the STAGE chip and the wave
+  const l1 = top + 15;
+  const lx = W / 2 - line1W / 2;
+  const chip = { x: lx, y: l1 - 14, w: chipW, h: 30 };
+  const ccx = chip.x + chip.w / 2;
+  const tk = clamp((t - WT.stageAt) / 0.45, 0, 1);
+  const chipPop = 1 + 0.35 * (1 - easeOutBack(tk));
+  ctx.save();
+  ctx.translate(ccx, l1);
+  ctx.scale(chipPop, chipPop);
+  ctx.translate(-ccx, -l1);
+  btn3d(ctx, chip, COLOR.stageTab, COLOR.stageTabDark, 10);
+  label(ctx, stText, ccx, chip.y + 13, 17, { lw: 4 });
+  const ph = (t / 2.7) % 1;
+  if (ph < 0.3) {
+    const a = Math.sin((ph / 0.3) * Math.PI);
+    ctx.globalAlpha *= a;
+    starPath(ctx, chip.x + chip.w - 8, chip.y + 5, 2.5 + 3.5 * a, 1.2, 4, t * 2);
+    ctx.fillStyle = CLASS_FX.spark;
+    ctx.fill();
+  }
+  ctx.restore();
+  label(ctx, waveText, lx + chipW + 10, l1 - 1, 20, { align: 'left', color: boss ? COLOR.bossText : COLOR.white, lw: 4.5 });
+
+  // line 2
+  const l2 = top + 42;
   ctx.save();
   ctx.globalAlpha *= alpha;
   if (fight) {
-    const lx = W / 2 - contentW / 2;
-    drawFoxBadge(ctx, lx + 8, ty, 0.62);
-    bumpLabel(ctx, num, lx + 22, ty + 1, size, bump, 'left');
-    label(ctx, rest, lx + 22 + numW, ty + 1, size, { align: 'left', lw: 3 });
+    const x2 = W / 2 - line2W / 2;
+    drawFoxBadge(ctx, x2 + 9, l2, 0.68);
+    bumpLabel(ctx, num, x2 + 24, l2 + 1, size, bump, 'left');
+    label(ctx, rest, x2 + 24 + numW, l2 + 1, size, { align: 'left', lw: 3.5 });
   } else if (text) {
     if (pop > 0 || b.phase === 'cleared') {
       const s = 1 + 0.4 * (1 - easeOutBack(clamp(pop / 0.3, 0, 1)));
-      ctx.translate(W / 2, ty);
+      ctx.translate(W / 2, l2);
       ctx.scale(s, s);
-      ctx.translate(-W / 2, -ty);
+      ctx.translate(-W / 2, -l2);
     }
-    if (b.phase !== 'victory' || pop > 0) label(ctx, text, W / 2, ty + 1, size, { color, lw: 3 });
+    if (b.phase !== 'victory' || pop > 0) label(ctx, text, W / 2, l2 + 1, size, { color, lw: 3.5 });
   }
   ctx.restore();
+}
+
+/** Looping arrows (the AUTO button), turning while auto battle is on. */
+function drawAutoIcon(ctx: Ctx, x: number, y: number, on: boolean, t: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (on) ctx.rotate(t * 2.4);
+  ctx.lineCap = 'round';
+  for (const [w, c] of [
+    [7, INK],
+    [3.5, COLOR.white],
+  ] as const) {
+    ctx.lineWidth = w;
+    ctx.strokeStyle = c;
+    for (const a of [0, Math.PI]) {
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, a + 0.35, a + 2.5);
+      ctx.stroke();
+    }
+  }
+  for (const a of [0, Math.PI]) {
+    const e = a + 2.5;
+    const hx = Math.cos(e) * 10;
+    const hy = Math.sin(e) * 10;
+    const tx = -Math.sin(e);
+    const ty = Math.cos(e);
+    poly(ctx, [hx + tx * 6, hy + ty * 6, hx - ty * 5.5 - tx * 1, hy + tx * 5.5 - ty * 1, hx + ty * 5.5 - tx * 1, hy - tx * 5.5 - ty * 1]);
+    fillStroke(ctx, COLOR.white, 2);
+  }
+  ctx.restore();
+}
+
+/** The distance run so far (the game's goal): a dark plate like the money and gem pills, under pause. */
+function kmBadge(ctx: Ctx, g: Game) {
+  const r = L.km;
+  const bump = g.kmBump;
+  const cy = btn3d(ctx, r, COLOR.hud, COLOR.hudDark, 14);
+  const cx = r.x + r.w / 2;
+  label(ctx, 'KM', cx, cy - 12, 14, { color: COLOR.toast, lw: 3.5 });
+  const s = g.kmShown.toFixed(1);
+  ctx.font = `19px ${FONT}`;
+  const size = clamp((19 * (r.w - 10)) / ctx.measureText(s).width, 11, 19);
+  bumpLabel(ctx, s, cx, cy + 8, size, bump, 'center');
 }
 
 export function drawHud(ctx: Ctx, g: Game) {
@@ -676,6 +720,13 @@ export function drawHud(ctx: Ctx, g: Game) {
   const sm = btn3d(ctx, L.speed, fast ? '#ffd23a' : '#b8b4c4', fast ? '#d99a12' : '#7d7990', 12, g.isPressed(L.speed));
   drawFastIcon(ctx, L.speed.x + L.speed.w / 2, sm - 3);
   label(ctx, fast ? 'x2' : 'x1', L.speed.x + L.speed.w - 13, sm + 11, 16);
+
+  // AUTO battle: navy like pause when off, START-WAVE green when on
+  const am = btn3d(ctx, L.auto, g.auto ? COLOR.cash : '#3f4373', g.auto ? COLOR.cashDark : '#262949', 12, g.isPressed(L.auto));
+  drawAutoIcon(ctx, L.auto.x + L.auto.w / 2, am - 6, g.auto, g.time);
+  label(ctx, 'AUTO', L.auto.x + L.auto.w / 2, am + 15, 13, { lw: 3.5 });
+
+  kmBadge(ctx, g);
 }
 
 // ---------------------------------------------------------------- grid tiles
@@ -1316,12 +1367,22 @@ export function drawPrep(ctx: Ctx, g: Game) {
   ctx.translate(-cx, -cy);
   const m = btn3d(ctx, r, boss ? '#ff5a4f' : '#5fd16f', boss ? '#c23a32' : '#2f9a48', 18, g.isPressed(r));
   drawSwords(ctx, r.x + 36, m, 1.15, '#ffffff');
-  label(ctx, boss ? 'BOSS WAVE!' : `START WAVE ${b.wave}`, cx + 16, m - 8, 25);
-  label(ctx, 'tap when you are ready', cx + 16, m + 16, 12, { color: '#eafbe9', lw: 3 });
+  label(ctx, boss ? 'BOSS WAVE!' : `START WAVE ${b.wave}`, cx + 16, m - 9, 25);
+  // the wave's recommended power, in the power tab's carrots: pale when the army has it, gold when it has not
+  const rec = b.waveRec;
+  const strong = g.power >= rec;
+  carrotText(ctx, 'RECOMMENDED', rec, cx + 16, m + 16, 13, strong ? '#eafbe9' : COLOR.toast);
   ctx.restore();
   ctx.save();
   ctx.globalAlpha = appear > 0.5 ? 0.75 + 0.25 * Math.sin(g.time * 3) : 0;
-  label(ctx, 'PREP TIME: open cases, merge and fuse!', W / 2, r.y + r.h + 26, 15, { color: COLOR.toast, lw: 4 });
+  const hint = g.auto
+    ? g.power > 0
+      ? `AUTO: the wave starts in ${Math.ceil(g.autoLeft)}...`
+      : 'AUTO waits: put a rabbit on the grid!'
+    : strong
+      ? 'PREP TIME: open cases, merge and fuse!'
+      : 'Below recommended: open cases, merge and fuse!';
+  label(ctx, hint, W / 2, r.y + r.h + 26, 15, { color: g.auto ? COLOR.cash : strong ? COLOR.toast : '#ff9f43', lw: 4 });
   ctx.restore();
 }
 
@@ -1400,17 +1461,28 @@ export function drawWaveClear(ctx: Ctx, g: Game) {
     ctx.stroke();
     ctx.restore();
   }
-  // the bonus
+  // the bonus, and the kilometres the squads run on (none for a wave replayed after a defeat)
   const bk = clamp((t - 0.55) / 0.25, 0, 1);
   if (bk > 0) {
+    const km = b.clearKm > 0;
     ctx.save();
-    ctx.translate(0, 52);
+    ctx.translate(km ? -60 : 0, 52);
     ctx.scale(easeOutBack(bk), easeOutBack(bk));
     rr(ctx, -52, -16, 104, 32, 16);
     fillStroke(ctx, COLOR.hudPill, 2);
     drawCash(ctx, -22, 0, 0.55);
     label(ctx, `+${b.clearBonus}`, 2, 1, 22, { align: 'left', color: COLOR.cash });
     ctx.restore();
+    if (km) {
+      const kk = easeOutBack(clamp((t - 0.7) / 0.25, 0, 1));
+      ctx.save();
+      ctx.translate(60, 52);
+      ctx.scale(kk, kk);
+      rr(ctx, -52, -16, 104, 32, 16);
+      fillStroke(ctx, COLOR.hudPill, 2);
+      label(ctx, `+${b.clearKm.toFixed(1)} KM`, 0, 1, 20, { color: COLOR.toast });
+      ctx.restore();
+    }
   }
   // twinkles around the ribbon
   for (let i = 0; i < 7; i++) {
@@ -1633,15 +1705,18 @@ export function drawStageClear(ctx: Ctx, g: Game) {
     }
   }
 
-  // gems rolling up
+  // gems rolling up (left), the distance run so far (right): the goal
   const n = Math.round(b.lastReward * clamp((t - 2.85) / 0.45, 0, 1));
-  label(ctx, `+${n}`, W / 2 - 6, P.y + 250, 40, { align: 'right', color: '#f2c9ff' });
-  drawGem(ctx, W / 2 + 24, P.y + 250, 1.2);
+  label(ctx, `+${n}`, W / 2 - 84, P.y + 250, 40, { align: 'right', color: '#f2c9ff' });
+  drawGem(ctx, W / 2 - 54, P.y + 250, 1.2);
+  label(ctx, 'DISTANCE RUN', W / 2 + 92, P.y + 228, 13, { color: COLOR.textDim, lw: 3 });
+  label(ctx, `${b.km.toFixed(1)} KM`, W / 2 + 92, P.y + 256, 30, { color: COLOR.toast, lw: 6 });
   const kept = Math.round((b.baseHp / b.baseMax) * 100);
-  label(ctx, `${b.stageKos} KOs  ·  best combo x${b.stageBest}  ·  ${kept}% carrots kept`, W / 2, P.y + 298, 14, { color: COLOR.textDim, lw: 3 });
+  label(ctx, `${b.stageKos} KOs  ·  best combo x${b.stageBest}  ·  ${kept}% carrots kept`, W / 2, P.y + 284, 14, { color: COLOR.textDim, lw: 3 });
   const next = b.stage + 1;
   const slot = Object.values(CELL_LOCKS).some((l) => l.kind === 'stage' && l.stage === next);
-  label(ctx, slot ? `Stage ${next} opens a new grid slot!` : `Next street: ${STREETS[streetOf(next)]}`, W / 2, P.y + 324, 15, { color: slot ? COLOR.cash : COLOR.toast, lw: 3 });
+  label(ctx, slot ? `Stage ${next} opens a new grid slot!` : `Next: ${STREETS[streetOf(next)]}, ${TRAVEL.km} km away`, W / 2, P.y + 305, 15, { color: slot ? COLOR.cash : COLOR.toast, lw: 3 });
+  carrotText(ctx, `STAGE ${next} RECOMMENDED`, recommendedPower(next, BAL.wavesPerStage), W / 2, P.y + 325, 14, COLOR.textDim);
 
   if (t >= g.winReady) {
     const pulse = 1 + Math.sin(g.time * 6) * 0.04;
@@ -1665,7 +1740,8 @@ export function drawDefeat(ctx: Ctx, g: Game) {
   overlayPanel(ctx, p);
   label(ctx, 'CARROTS STOLEN!', W / 2, p.y + 66, 38, { color: '#ff6b5f', lw: 8 });
   label(ctx, 'The foxes ran off with your carrots...', W / 2, p.y + 120, 18, { color: COLOR.textDim });
-  label(ctx, `Stage ${b.stage}, wave ${b.wave}`, W / 2, p.y + 150, 20, { color: COLOR.textDim });
+  label(ctx, `Stage ${b.stage}, wave ${b.wave}  ·  ${b.km.toFixed(1)} KM run`, W / 2, p.y + 150, 20, { color: COLOR.textDim });
+  label(ctx, `Best run: ${g.bestKm.toFixed(1)} KM`, W / 2, p.y + 174, 15, { color: COLOR.toast, lw: 3 });
   // every break points at the next goal
   const feat = g.featured();
   const next = feat ? `Next evolution: ${cls(BAL.evoMinLevel)} ${ITEMS[feat.recipe.main].name} + ${ITEMS[feat.recipe.partner].name}` : `Super weapons ${g.runFound.size}/${RECIPES.length}`;

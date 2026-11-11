@@ -4,6 +4,7 @@ import {
   GEAR_FX,
   ITEMS,
   MAX_LEVEL,
+  canTurn,
   gearBoosts,
   isGear,
   isSuper,
@@ -145,9 +146,18 @@ export class Inventory {
     return null;
   }
 
-  /** The most useful free spot for a piece (linked weapon, gear touching the most targets...), either orientation. */
-  bestSpot(it: Item): { col: number; row: number; w: number; h: number } | null {
-    const shapes: [number, number][] = it.w === it.h ? [[it.w, it.h]] : [[it.w, it.h], [it.h, it.w]];
+  /**
+   * The most useful free spot for a piece (linked weapon, gear touching the most targets...), in the shape it has
+   * now. `turn` also tries it turned, as a last resort only when nothing fits the way it is (never for a rabbit,
+   * which always stands up).
+   */
+  bestSpot(it: Item, turn = false): { col: number; row: number; w: number; h: number } | null {
+    const own = this.bestSpotShaped(it, [[it.w, it.h]]);
+    if (own || !turn || it.w === it.h || !canTurn(it.type)) return own;
+    return this.bestSpotShaped(it, [[it.h, it.w]]);
+  }
+
+  private bestSpotShaped(it: Item, shapes: [number, number][]): { col: number; row: number; w: number; h: number } | null {
     const ow = it.w;
     const oh = it.h;
     let best: { col: number; row: number; w: number; h: number } | null = null;

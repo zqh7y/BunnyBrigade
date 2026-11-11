@@ -353,7 +353,13 @@ export const BAL = {
   foxHp: 1.1, // overall fox toughness
   foxHpGrowth: 1.15, // per wave
   foxDmgGrowth: 1.1,
+  kmPerWave: 1.5, // the squads run a little after every wave cleared (the stage's sprint to the next street is TRAVEL.km)
+  autoStart: 3, // AUTO battle: seconds of untouched prep before the wave starts by itself
+  recPower: 3, // recommended power = the foxes' health per second of the wave x this (misses, dodges, armour, their damage)
 };
+
+/** Rabbits always stand up (1x2): only other pieces turn, by a tap or when there is no room the way they are. */
+export const canTurn = (t: ItemType) => t !== 'rabbit';
 
 export const sellValue = (level: number) => [1, 3, 6, 12, 24, 48, 96][level - 1] ?? 1;
 export const itemSellValue = (t: ItemType, level: number) => sellValue(level) * (isSuper(t) ? BAL.evoSellMul : 1);
@@ -385,6 +391,34 @@ export const FOXES: Record<FoxKind, FoxDef> = {
   ninja: { name: 'Shadow', weapon: 'knife', hp: 44, dmg: 10, cd: 0.75, range: 28, speed: 62, scale: 0.98, reward: 3, armor: 0, leak: 30, minWave: 5, weight: 1.5 },
   boss: { name: 'Big Red', weapon: 'smg', hp: 900, dmg: 4, cd: 0.16, range: 240, speed: 22, scale: 1.8, reward: 25, armor: 0.15, leak: 250, minWave: 999, weight: 0 },
 };
+
+/** How many foxes a wave sends (on the boss wave, Big Red comes on top). */
+export function waveFoxCount(stage: number, wave: number) {
+  return wave === BAL.wavesPerStage ? 14 + stage * 3 : 6 + wave * 3 + (stage - 1) * 4;
+}
+
+/**
+ * The army power (the carrot number on the power tab) a wave is comfortable at. The wave's expected fox health,
+ * over the time the foxes take to arrive (the spawn pacing of battle.ts, plus the walk in and the boss's long
+ * fight), is the damage per second it asks for; BAL.recPower scales that to the power tab, which also counts
+ * health, and allows for shots that miss, foxes that dodge and armour. A stage's number is its boss wave's.
+ * Rounded to a friendly step.
+ */
+export function recommendedPower(stage: number, wave: number) {
+  const g = (stage - 1) * BAL.wavesPerStage + wave;
+  const pool = (Object.keys(FOXES) as FoxKind[]).filter((k) => FOXES[k].minWave <= g);
+  const weight = pool.reduce((a, k) => a + FOXES[k].weight, 0);
+  const avgHp = pool.reduce((a, k) => a + FOXES[k].hp * FOXES[k].weight, 0) / weight;
+  const boss = wave === BAL.wavesPerStage;
+  const n = waveFoxCount(stage, wave);
+  const hp = (n * avgHp + (boss ? FOXES.boss.hp : 0)) * BAL.foxHp * BAL.foxHpGrowth ** (g - 1);
+  const gap = Math.max(0.5, 1.35 - wave * 0.07); // seconds between spawns
+  const group = 1 + Math.min(1, 0.25 + wave * 0.04) + Math.min(1, wave * 0.03); // foxes per spawn
+  const time = (n / group) * gap + 8 + (boss ? 15 : 0);
+  const p = (hp / time) * BAL.recPower;
+  const step = p < 100 ? 5 : p < 1000 ? 10 : 50;
+  return Math.max(step, Math.round(p / step) * step);
+}
 
 /** Stats of one rabbit soldier: a weapon (with its level) carried by a rabbit (with its level). */
 export function rabbitStats(weapon: WeaponId, wLevel: number, rLevel: number) {

@@ -1,5 +1,5 @@
 import { sfx, type SoundName } from './audio';
-import { AWAKEN_LEVEL, BAL, FOXES, STREETS, WEAPONS, rabbitStats, streetOf, type EvoTrait, type FoxKind, type ProjKind, type WeaponId } from './data';
+import { AWAKEN_LEVEL, BAL, FOXES, STREETS, WEAPONS, rabbitStats, recommendedPower, streetOf, waveFoxCount, type EvoTrait, type FoxKind, type ProjKind, type WeaponId } from './data';
 import {
   STEP_EJECT,
   STEP_FROZEN,
@@ -230,6 +230,7 @@ export interface Unit extends FxBody {
   vz: number;
   cheer: number;
   dustT: number;
+  stepN: number; // half-strides walked: a foot lands each time it ticks over
   style: Style; // its own fur, clothes, hat and accessory
   dead: boolean;
   reward: number;
@@ -360,6 +361,8 @@ export interface Banner {
   sub: string;
   t: number;
   color: string;
+  /** The stage banner also shows the stage's recommended power. */
+  rec?: number;
 }
 
 interface Member {
@@ -450,6 +453,7 @@ function makeUnit(side: Side, kind: FoxKind | 'rabbit', x: number, y: number): U
     vz: 0,
     cheer: 0,
     dustT: rand(0, 0.3),
+    stepN: -1, // set on its first frame, so a new soldier does not stamp a step at once
     style: ICON_RABBIT,
     dead: false,
     reward: 0,
@@ -551,6 +555,15 @@ export class Battle {
   leakFlash = 0;
   stage = 1;
   wave = 1;
+  /**
+   * Kilometres run this game, the goal: BAL.kmPerWave for each wave cleared (once: a wave replayed after a defeat
+   * pays nothing) and TRAVEL.km for the sprint to the next street, counted up live while it runs.
+   */
+  km = 0;
+  /** The highest wave of this stage that has paid its kilometres, and what the last clear paid (for the ribbon). */
+  kmWave = 0;
+  clearKm = 0;
+  private travelFromKm = 0;
   phase: Phase = 'prep';
   /** cleared, victory, travel: seconds since it began. */
   phaseT = 0;
@@ -610,6 +623,15 @@ export class Battle {
 
   get isBossWave() {
     return this.wave === BAL.wavesPerStage;
+  }
+
+  /** Recommended power for the current (or next) wave, and for the whole stage (its boss wave). */
+  get waveRec() {
+    return recommendedPower(this.stage, Math.min(this.wave, BAL.wavesPerStage));
+  }
+
+  get stageRec() {
+    return recommendedPower(this.stage, BAL.wavesPerStage);
   }
 
   get globalWave() {
@@ -798,7 +820,7 @@ export class Battle {
   // ---------- waves ----------
 
   private showStageBanner() {
-    this.banner = { text: `STAGE ${this.stage}`, sub: STREETS[streetOf(this.stage)], t: 0, color: COLOR.white };
+    this.banner = { text: `STAGE ${this.stage}`, sub: STREETS[streetOf(this.stage)], t: 0, color: COLOR.white, rec: this.stageRec };
   }
 
   /** The START button (or the prep countdown). Returns false when it is not prep time. */
@@ -811,7 +833,7 @@ export class Battle {
 
   private spawnQueue() {
     const g = this.globalWave;
-    const count = this.isBossWave ? 14 + this.stage * 3 : 6 + this.wave * 3 + (this.stage - 1) * 4;
+    const count = waveFoxCount(this.stage, this.wave);
     const pool = (Object.keys(FOXES) as FoxKind[]).filter((k) => FOXES[k].minWave <= g);
     const total = pool.reduce((a, k) => a + FOXES[k].weight, 0);
     this.queue = [];
@@ -841,6 +863,10 @@ export class Battle {
   private waveCleared() {
     const bonus = 2 + Math.floor(this.wave / 2);
     this.econ.cash += bonus;
+    // the squads run on a little: kilometres, the first time this wave of this stage is cleared
+    this.clearKm = this.wave > this.kmWave ? BAL.kmPerWave : 0;
+    this.km += this.clearKm;
+    this.kmWave = Math.max(this.kmWave, this.wave);
     for (const u of this.units) if (u.side === 'rabbit') u.cheer = rand(0.9, 1.3);
     this.fx.confetti(W / 2, L.roadTop + 20);
     if (this.wave >= BAL.wavesPerStage) {
@@ -913,6 +939,7 @@ export class Battle {
 
   nextStage() {
     this.stage++;
+    this.kmWave = 0;
     this.resetField();
   }
 
@@ -921,6 +948,7 @@ export class Battle {
     if (this.phase !== 'victory') return;
     this.phase = 'travel';
     this.phaseT = 0;
+    this.travelFromKm = this.km;
     this.projs = [];
     this.banner = null;
     this.fx.list = this.fx.list.filter((p) => p.layer !== 0); // scorch marks would stay put while the road scrolls
@@ -1009,7 +1037,10 @@ export class Battle {
       }
     }
     this.units = this.units.filter((u) => !u.dead);
+    this.km = this.travelFromKm + TRAVEL.km * this.travelK;
     if (T >= TRAVEL.dur) {
+      this.km = this.travelFromKm + TRAVEL.km;
+      this.kmWave = 0;
       this.stage++;
       this.resetField(true);
       for (const u of this.units) u.cheer = rand(0.4, 0.8);
@@ -2202,13 +2233,19 @@ export class Battle {
     // kneeling shooters drop to one knee while they aim
     u.crouch += ((u.kneel && !u.melee && u.aim > 0.5 && !u.moving ? 1 : 0) - u.crouch) * Math.min(1, dt * 7);
     u.walk += dt * (u.moving ? 11 * Math.min(1.6, fast) : 3 * u.tempo);
-    if (u.moving && u.z === 0) {
+    // footsteps: a rabbit kicks up a little dust cloud and leaves a paw print each time a foot lands (twice a
+    // stride, when the walk's bob touches down); foxes just scuff up some dust now and then
+    const stepN = Math.floor(u.walk / Math.PI);
+    if (u.side === 'rabbit') {
+      if (u.moving && u.z === 0 && u.stepN >= 0 && stepN !== u.stepN) this.fx.step(u.x - u.face * 3 * u.scale, u.y, u.face, u.scale, (stepN & 1) === 1);
+    } else if (u.moving && u.z === 0) {
       u.dustT -= dt;
       if (u.dustT <= 0) {
         u.dustT = 0.32;
         if (Math.random() < 0.6) this.fx.dust(u.x - u.face * 7 * u.scale, u.y);
       }
     }
+    u.stepN = stepN;
     u.y = clamp(u.y, L.laneTop, L.laneBottom);
     if (u.side === 'rabbit') u.x = clamp(u.x, -60, u.melee ? W - 22 : RANGED_LINE);
   }

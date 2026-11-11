@@ -40,6 +40,8 @@ export type FxKind =
   | 'casing'
   | 'body'
   | 'dust'
+  | 'paw' // a rabbit's paw print on the road, fading
+  | 'stepRing' // the little ring a landing foot makes on the road
   | 'scorch'
   | 'chunk'
   | 'beam'
@@ -578,6 +580,19 @@ export class Effects {
     this.add({ kind: 'dust', x: x + frand(-3, 3), y: y - 2, vx: frand(-12, 12), vy: frand(-14, -4), life: 0.4, size: frand(3, 5), layer: 0 });
   }
 
+  /**
+   * A rabbit's foot landing (`left` / right foot): a quick ring on the road, a little cloud of dust kicked back
+   * and a paw print that fades.
+   */
+  step(x: number, y: number, face: number, scale: number, left: boolean) {
+    const fy = y + (left ? -3 : 3) * scale;
+    this.add({ kind: 'stepRing', x, y: fy, life: 0.3, size: scale, layer: 0 });
+    for (let i = 0; i < 3; i++) {
+      this.add({ kind: 'dust', x: x + frand(-3, 3), y: fy - 2, vx: -face * frand(25, 65), vy: frand(-26, -8), drag: 2.5, life: frand(0.45, 0.7), size: frand(6, 9) * scale, layer: 0 });
+    }
+    this.add({ kind: 'paw', x: x + face * 2, y: fy, life: 1.6, size: scale * 1.3, face, layer: 0 });
+  }
+
   fuse(x: number, y: number) {
     this.add({ kind: 'spark', x, y, vx: frand(-60, 60), vy: frand(-90, -20), life: 0.18, size: 1.5, color: '#ffd36b', drag: 3 });
   }
@@ -783,6 +798,31 @@ export class Effects {
           circle(ctx, p.x, p.y, p.size * (0.6 + u * 0.9));
           ctx.fillStyle = '#d9cdbf';
           ctx.fill();
+          break;
+        case 'paw': {
+          // pad and three toes, squashed flat onto the road, pointing the way the rabbit walks
+          ctx.globalAlpha = Math.min(1, a * 1.6) * 0.42;
+          ctx.translate(p.x, p.y);
+          ctx.scale(p.face * p.size, p.size * 0.6);
+          ctx.fillStyle = '#3a3040';
+          ellipse(ctx, 0, 0, 4.2, 3.4);
+          ctx.fill();
+          for (const [tx, ty] of [
+            [5, -3.6],
+            [6.2, 0],
+            [5, 3.6],
+          ]) {
+            circle(ctx, tx, ty, 1.7);
+            ctx.fill();
+          }
+          break;
+        }
+        case 'stepRing':
+          ctx.globalAlpha = a * 0.7;
+          ellipse(ctx, p.x, p.y, p.size * (4 + u * 11), p.size * (1.5 + u * 4));
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
           break;
         case 'scorch':
           ctx.globalAlpha = Math.min(1, a * 2) * 0.3;

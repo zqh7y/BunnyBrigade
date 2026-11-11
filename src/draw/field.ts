@@ -5,7 +5,7 @@ import { TRACER, atkFx, smearOf } from '../attackfx';
 import { COLOR, EVO, FX, L, TIER, W } from '../theme';
 import { circle, clamp, easeOutBack, ellipse, fillStroke, frand, hash, label, lerp, line, poly, rr, starPath, type Ctx } from '../util';
 import { BARREL, GUN_HAND, ROCKET_HAND, SHOULDER, drawFox, drawRabbit, type Look } from './characters';
-import { drawCarrot } from './icons';
+import { carrotText, drawCarrot } from './icons';
 import { drawWeapon } from './weapons';
 
 /*
@@ -345,6 +345,92 @@ export function drawProjectile(ctx: Ctx, p: Projectile) {
     }
   }
   ctx.restore();
+}
+
+/** The carrot hill: where each carrot sits in the pile, bottom row first (the top ones are stolen first). */
+const HILL = { x: 46, y: 552, n: 21 };
+const HILL_SLOTS = (() => {
+  const out: { x: number; y: number; rot: number }[] = [];
+  const rows = [6, 5, 4, 3, 2, 1];
+  let i = 0;
+  rows.forEach((c, r) => {
+    for (let k = 0; k < c; k++, i++) {
+      out.push({
+        x: HILL.x + (k - (c - 1) / 2) * 15 + (hash(i * 3.7) - 0.5) * 4,
+        y: HILL.y - 4 - r * 11 + (hash(i * 9.1) - 0.5) * 3,
+        rot: (k - (c - 1) / 2) * 0.28 + (hash(i * 5.3) - 0.5) * 0.5, // fanning out, like a heap
+      });
+    }
+  });
+  return out;
+})();
+/** Carrots flying off the pile when a fox steals some (draw-side only), and how many the pile showed last frame. */
+const stolen: { x: number; y: number; vx: number; vy: number; rot: number; vr: number; t: number }[] = [];
+let hillShown = -1;
+let hillT = -1;
+
+/** One pile: a soil mound and `n` cartoon carrots heaped on it (leaves stirring in the breeze). */
+function carrotPile(ctx: Ctx, ox: number, n: number, time: number, wobble: number) {
+  ctx.save();
+  ctx.translate(ox, 0);
+  ellipse(ctx, HILL.x + 4, HILL.y + 6, 66, 12);
+  ctx.fillStyle = 'rgba(30, 20, 30, 0.22)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(HILL.x - 62, HILL.y + 6);
+  ctx.quadraticCurveTo(HILL.x, HILL.y - 30, HILL.x + 62, HILL.y + 6);
+  ctx.closePath();
+  fillStroke(ctx, '#9a6a45', 2.5);
+  ctx.beginPath();
+  ctx.moveTo(HILL.x - 40, HILL.y - 4);
+  ctx.quadraticCurveTo(HILL.x - 6, HILL.y - 22, HILL.x + 30, HILL.y - 8);
+  ctx.strokeStyle = 'rgba(255, 230, 200, 0.35)';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  for (let i = 0; i < Math.min(n, HILL_SLOTS.length); i++) {
+    const sl = HILL_SLOTS[i];
+    const sway = Math.sin(time * 2.2 + i * 1.3) * 0.04 + wobble * Math.sin(time * 40 + i) * 0.12;
+    drawCarrot(ctx, sl.x, sl.y, 1.12, sl.rot + sway);
+  }
+  ctx.restore();
+}
+
+/**
+ * The carrot stash, as a cartoon hill of carrots at the left end of the road, behind the rabbits: it shrinks from
+ * the top as the foxes steal carrots (a stolen carrot flips off the pile), shakes when they do, and scrolls away
+ * on the run to the next street, where a full one is waiting.
+ */
+function drawCarrotHill(ctx: Ctx, b: Battle, time: number) {
+  const dt = hillT < 0 ? 0 : clamp(time - hillT, 0, 0.1);
+  hillT = time;
+  const n = Math.ceil(HILL.n * clamp(b.baseHp / b.baseMax, 0, 1));
+  if (hillShown >= 0 && n < hillShown && b.phase !== 'travel') {
+    for (let i = n; i < hillShown; i++) {
+      const sl = HILL_SLOTS[i];
+      stolen.push({ x: sl.x, y: sl.y, vx: -frand(90, 170), vy: -frand(160, 260), rot: sl.rot, vr: frand(-9, -4), t: 0 });
+    }
+  }
+  hillShown = n;
+  const off = b.travelOffset;
+  carrotPile(ctx, -off, n, time, b.leakFlash);
+  if (b.phase === 'travel') carrotPile(ctx, TRAVEL.screens * W - off, HILL.n, time, 0); // the next street's stash
+  for (let i = stolen.length - 1; i >= 0; i--) {
+    const c = stolen[i];
+    c.t += dt;
+    c.vy += 700 * dt;
+    c.x += c.vx * dt;
+    c.y += c.vy * dt;
+    c.rot += c.vr * dt;
+    if (c.t > 1.2) {
+      stolen.splice(i, 1);
+      continue;
+    }
+    ctx.save();
+    ctx.globalAlpha = clamp((1.2 - c.t) / 0.3, 0, 1);
+    drawCarrot(ctx, c.x, c.y, 1.12, c.rot);
+    ctx.restore();
+  }
 }
 
 /** Carrot stash HP: floating number + bar at the left end of the road, shaking red when foxes steal. */
@@ -736,6 +822,7 @@ export function drawField(ctx: Ctx, b: Battle, time = 0) {
   if (b.kickX || b.kickY) ctx.translate(b.kickX, b.kickY);
   drawSpeedLines(ctx, b, false);
   b.fx.draw(ctx, 0);
+  drawCarrotHill(ctx, b, time); // on the road marks, behind every soldier
   const sorted = b.units.filter((u) => !u.dead).sort((a, c) => a.y - c.y); // retired soldiers vanish even while paused
   // awakened supers stand in a soft gold glow
   ctx.save();
@@ -823,6 +910,7 @@ export function drawField(ctx: Ctx, b: Battle, time = 0) {
     ctx.scale(pop, pop);
     label(ctx, b.banner.text, 0, 0, 48, { color: b.banner.color, lw: 9 });
     if (b.banner.sub) label(ctx, b.banner.sub, 0, 40, 22, { color: COLOR.toast });
+    if (b.banner.rec) carrotText(ctx, 'RECOMMENDED', b.banner.rec, 0, 72, 18);
     ctx.restore();
   }
 }
