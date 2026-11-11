@@ -17,10 +17,11 @@ export const COLOR = {
   toast: '#ffe27a',
 
   hudPill: 'rgba(36, 32, 46, 0.8)',
-  // the top bar (money, wave bar, gems, stage plate): candy bodies in the dark of the old money / gem pills
-  hud: '#24202e',
-  hudDark: '#141119',
-  hudWell: '#0e0b13',
+  // the top bar (money, wave bar, gems) and the KM badge: light lavender candy, a deeper lavender window for the numbers
+  hud: '#d7cdf4',
+  hudDark: '#9c8fcf',
+  hudWell: '#ab9ee0',
+  hudShade: 'rgba(50, 30, 110, 0.22)', // the shadow along the top of a recessed window
   cash: '#5fd16f',
   cashDark: '#2f9a48',
   gem: '#b94dff',
@@ -35,12 +36,10 @@ export const COLOR = {
   progressBack: '#3a3448',
   bannerBoss: '#ff5a4f',
   // the wave tracker (top centre)
-  hereFill: '#fff7e0',
-  waveChipDark: '#d9821c',
+  waveFillDark: '#d9821c', // the bottom lip of the wave bar's orange fill
   stageTab: '#ffd23a',
   stageTabDark: '#d99a12',
   bossCapDark: '#c23a32',
-  bossText: '#ffb0a8',
 
   panelFrame: '#8d8896',
   panelInner: '#55515d',

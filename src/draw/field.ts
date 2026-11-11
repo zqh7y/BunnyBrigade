@@ -347,74 +347,124 @@ export function drawProjectile(ctx: Ctx, p: Projectile) {
   ctx.restore();
 }
 
-/** The carrot hill: where each carrot sits in the pile, bottom row first (the top ones are stolen first). */
-const HILL = { x: 46, y: 552, n: 21 };
-const HILL_SLOTS = (() => {
-  const out: { x: number; y: number; rot: number }[] = [];
-  const rows = [6, 5, 4, 3, 2, 1];
-  let i = 0;
-  rows.forEach((c, r) => {
-    for (let k = 0; k < c; k++, i++) {
-      out.push({
-        x: HILL.x + (k - (c - 1) / 2) * 15 + (hash(i * 3.7) - 0.5) * 4,
-        y: HILL.y - 4 - r * 11 + (hash(i * 9.1) - 0.5) * 3,
-        rot: (k - (c - 1) / 2) * 0.28 + (hash(i * 5.3) - 0.5) * 0.5, // fanning out, like a heap
-      });
-    }
-  });
-  return out;
-})();
-/** Carrots flying off the pile when a fox steals some (draw-side only), and how many the pile showed last frame. */
-const stolen: { x: number; y: number; vx: number; vy: number; rot: number; vr: number; t: number }[] = [];
+/** The carrot hill's foot (n = how many steps the pile has between full and empty) and its colours. */
+const HILL = { x: 58, y: 556, n: 21 };
+// the cloud is a lighter, softer orange than the carrots (#ff8a2b), so the whole carrots on it stand out
+const HILL_COLOR = { body: '#ffbd6e', light: '#ffdba3', dark: '#f5a456', shadow: 'rgba(30, 20, 30, 0.22)' };
+/** The orange cloud's lumps (x, y from the foot at full size, radius): big ones low, small ones on top, a bit messy. */
+const HILL_LUMPS = (
+  [
+    [-64, -3, 8],
+    [-48, -9, 14],
+    [-28, -13, 19],
+    [-4, -15, 22],
+    [21, -12, 20],
+    [44, -8, 14],
+    [61, -3, 8],
+    [-36, -28, 13],
+    [-14, -33, 17],
+    [11, -32, 16],
+    [33, -24, 12],
+    [-22, -45, 10],
+    [0, -47, 12],
+    [19, -42, 9],
+  ] as const
+).map(([x, y, r], i) => ({ x: x + (hash(i * 4.1) - 0.5) * 5, y: y + (hash(i * 7.7) - 0.5) * 3, r: r + (hash(i * 2.3) - 0.5) * 2 }));
+/** The whole carrots, in the order the foxes take them: the two spilled at the foot first, the one on top last. */
+const HILL_CARROTS = [
+  { x: 74, y: -1, rot: 1.5 },
+  { x: -56, y: 3, rot: -1.45 },
+  { x: 45, y: -27, rot: 1.0 },
+  { x: -46, y: -31, rot: -1.05 },
+  { x: 25, y: -47, rot: 0.75 },
+  { x: -25, y: -50, rot: -0.7 },
+  { x: 1, y: -61, rot: 0.12 },
+];
+/** HILL_CARROTS indices, back (higher up) to front, the order they are drawn in. */
+const HILL_DRAW = HILL_CARROTS.map((_, i) => i).sort((a, b) => HILL_CARROTS[a].y - HILL_CARROTS[b].y);
+/** How many whole carrots sit on a pile of `n` steps. */
+const carrotsOn = (n: number) => Math.ceil((HILL_CARROTS.length * n) / HILL.n);
+/** The cloud's scale for a pile at k (0..1): it shrinks to 0.4 of full, then melts away over the last step. */
+const pileScale = (k: number) => (0.4 + 0.6 * k) * Math.min(1, k * HILL.n);
+/** The whole carrots' size on a pile at k (they shrink less than the cloud). */
+const pileCarrot = (k: number) => 0.75 + 0.35 * k;
+/** Carrots flying off the pile when a fox steals some (draw-side only), the steps the pile showed last frame, and its eased size. */
+const stolen: { x: number; y: number; vx: number; vy: number; rot: number; vr: number; size: number; t: number }[] = [];
 let hillShown = -1;
+let hillK = 1;
 let hillT = -1;
 
-/** One pile: a soil mound and `n` cartoon carrots heaped on it (leaves stirring in the breeze). */
-function carrotPile(ctx: Ctx, ox: number, n: number, time: number, wobble: number) {
+/**
+ * One pile: a messy orange cloud (every lump stroked fat in ink, then all filled, so only the outer edge keeps its
+ * outline), shrunk about its foot for a pile at k (0..1), with `m` whole carrots on it (shrinking less), leaves stirring.
+ */
+function carrotPile(ctx: Ctx, ox: number, k: number, m: number, time: number, wobble: number) {
+  const s = pileScale(k);
   ctx.save();
-  ctx.translate(ox, 0);
-  ellipse(ctx, HILL.x + 4, HILL.y + 6, 66, 12);
-  ctx.fillStyle = 'rgba(30, 20, 30, 0.22)';
+  ctx.translate(ox + HILL.x + wobble * Math.sin(time * 40) * 3, HILL.y);
+  ellipse(ctx, 2, 4, 74 * s, 11 * s);
+  ctx.fillStyle = HILL_COLOR.shadow;
   ctx.fill();
+
+  ctx.save();
+  ctx.scale(s, s);
   ctx.beginPath();
-  ctx.moveTo(HILL.x - 62, HILL.y + 6);
-  ctx.quadraticCurveTo(HILL.x, HILL.y - 30, HILL.x + 62, HILL.y + 6);
-  ctx.closePath();
-  fillStroke(ctx, '#9a6a45', 2.5);
-  ctx.beginPath();
-  ctx.moveTo(HILL.x - 40, HILL.y - 4);
-  ctx.quadraticCurveTo(HILL.x - 6, HILL.y - 22, HILL.x + 30, HILL.y - 8);
-  ctx.strokeStyle = 'rgba(255, 230, 200, 0.35)';
-  ctx.lineWidth = 3;
-  ctx.lineCap = 'round';
+  for (const l of HILL_LUMPS) {
+    ctx.moveTo(l.x + l.r, l.y);
+    ctx.arc(l.x, l.y, l.r, 0, Math.PI * 2);
+  }
+  ctx.lineWidth = 5 / s;
+  ctx.strokeStyle = COLOR.ink;
   ctx.stroke();
-  for (let i = 0; i < Math.min(n, HILL_SLOTS.length); i++) {
-    const sl = HILL_SLOTS[i];
-    const sway = Math.sin(time * 2.2 + i * 1.3) * 0.04 + wobble * Math.sin(time * 40 + i) * 0.12;
-    drawCarrot(ctx, sl.x, sl.y, 1.12, sl.rot + sway);
+  ctx.fillStyle = HILL_COLOR.body;
+  ctx.fill();
+  ctx.clip();
+  // a darker belly, and a soft light on the upper side of each big lump
+  ellipse(ctx, 0, 6, 80, 14);
+  ctx.fillStyle = HILL_COLOR.dark;
+  ctx.fill();
+  ctx.fillStyle = HILL_COLOR.light;
+  for (const l of HILL_LUMPS) {
+    if (l.r < 11) continue;
+    ellipse(ctx, l.x - l.r * 0.28, l.y - l.r * 0.4, l.r * 0.42, l.r * 0.26, -0.3);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  for (const i of HILL_DRAW) {
+    if (i < HILL_CARROTS.length - m) continue; // already stolen
+    const c = HILL_CARROTS[i];
+    const sway = Math.sin(time * 2.2 + i * 1.3) * 0.05 + wobble * Math.sin(time * 40 + i) * 0.15;
+    drawCarrot(ctx, c.x * s, c.y * s, pileCarrot(k), c.rot + sway);
   }
   ctx.restore();
 }
 
 /**
- * The carrot stash, as a cartoon hill of carrots at the left end of the road, behind the rabbits: it shrinks from
- * the top as the foxes steal carrots (a stolen carrot flips off the pile), shakes when they do, and scrolls away
- * on the run to the next street, where a full one is waiting.
+ * The carrot stash, as a messy orange cloud of carrots at the left end of the road, behind the rabbits: it shrinks
+ * as the foxes steal carrots (each theft flips a carrot off it), shakes when they do, and scrolls away on the run
+ * to the next street, where a full one is waiting.
  */
 function drawCarrotHill(ctx: Ctx, b: Battle, time: number) {
   const dt = hillT < 0 ? 0 : clamp(time - hillT, 0, 0.1);
   hillT = time;
   const n = Math.ceil(HILL.n * clamp(b.baseHp / b.baseMax, 0, 1));
   if (hillShown >= 0 && n < hillShown && b.phase !== 'travel') {
-    for (let i = n; i < hillShown; i++) {
-      const sl = HILL_SLOTS[i];
-      stolen.push({ x: sl.x, y: sl.y, vx: -frand(90, 170), vy: -frand(160, 260), rot: sl.rot, vr: frand(-9, -4), t: 0 });
+    const s = pileScale(hillK);
+    const size = pileCarrot(hillK);
+    for (let i = hillShown; i > n; i--) {
+      // the whole carrot that leaves the pile at this step, or else one pulled out of the cloud's top
+      const m = carrotsOn(i);
+      const c = carrotsOn(i - 1) < m ? HILL_CARROTS[HILL_CARROTS.length - m] : { x: frand(-22, 22), y: -44, rot: frand(-0.6, 0.6) };
+      stolen.push({ x: HILL.x + c.x * s, y: HILL.y + c.y * s, vx: -frand(90, 170), vy: -frand(160, 260), rot: c.rot, vr: frand(-9, -4), size, t: 0 });
     }
   }
+  const k = n / HILL.n;
+  hillK = hillShown < 0 || k > hillK ? k : hillK + (k - hillK) * (1 - Math.exp(-dt * 8)); // shrinks smoothly, refills at once
   hillShown = n;
   const off = b.travelOffset;
-  carrotPile(ctx, -off, n, time, b.leakFlash);
-  if (b.phase === 'travel') carrotPile(ctx, TRAVEL.screens * W - off, HILL.n, time, 0); // the next street's stash
+  if (hillK > 0.005) carrotPile(ctx, -off, hillK, carrotsOn(n), time, b.leakFlash);
+  if (b.phase === 'travel') carrotPile(ctx, TRAVEL.screens * W - off, 1, HILL_CARROTS.length, time, 0); // the next street's stash
   for (let i = stolen.length - 1; i >= 0; i--) {
     const c = stolen[i];
     c.t += dt;
@@ -428,7 +478,7 @@ function drawCarrotHill(ctx: Ctx, b: Battle, time: number) {
     }
     ctx.save();
     ctx.globalAlpha = clamp((1.2 - c.t) / 0.3, 0, 1);
-    drawCarrot(ctx, c.x, c.y, 1.12, c.rot);
+    drawCarrot(ctx, c.x, c.y, c.size, c.rot);
     ctx.restore();
   }
 }
