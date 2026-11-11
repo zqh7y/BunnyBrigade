@@ -443,8 +443,10 @@ class Music {
       return;
     }
     const now = ac.currentTime;
-    if (this.nextT < now - 0.1) {
-      // fell behind (the tab was hidden, or just unlocked): restart cleanly on a fresh bar
+    if (this.nextT <= 0 || this.nextT < now - 0.1) {
+      // fell behind (the tab was hidden, or just unlocked): restart cleanly on a fresh bar.
+      // nextT 0 counts too: right after unlock the clock is still under 0.1 s, and a note at time 0 with its
+      // timing jitter would land before zero, which the audio API refuses.
       this.nextT = now + 0.06;
       this.step = 0;
       if (this.pending) {
@@ -482,6 +484,7 @@ class Music {
 
   private note(e: Ev, t: number) {
     const ac = this.ac!;
+    t = Math.max(t, ac.currentTime); // the jitter never schedules a note in the past
     const def = INSTRUMENTS[e.i];
     const list = this.samples.get(e.i);
     if (!list) return;
