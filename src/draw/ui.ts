@@ -71,13 +71,31 @@ function bumpLabel(ctx: Ctx, s: string, x: number, y: number, size: number, bump
   ctx.restore();
 }
 
-function pill(ctx: Ctx, r: Rect) {
-  rr(ctx, r.x, r.y, r.w, r.h, r.h / 2);
-  ctx.fillStyle = COLOR.hudPill;
+/**
+ * A money / gem counter in a top corner, built from the wave bar's parts: a navy candy body (btn3d), a recessed
+ * dark window holding the number, and the currency icon at the outer end (`iconSide`), where coins and gems fly to.
+ * The number shrinks to fit the window, bumps gold on a gain (bumpLabel) and the window flashes white, like the
+ * wave chip on a knock-out. Returns the face's centre y, for the icon.
+ */
+function currencyPill(ctx: Ctx, r: Rect, value: number, bump: number, iconSide: 'left' | 'right') {
+  const cy = btn3d(ctx, r, COLOR.waveBar, COLOR.waveBarDark, 16);
+  const iconW = 42; // the end of the body the icon sits on
+  const win = { x: iconSide === 'left' ? r.x + iconW : r.x + 5, y: cy - 15, w: r.w - iconW - 5, h: 30 };
+  rr(ctx, win.x, win.y, win.w, win.h, 11);
+  fillStroke(ctx, COLOR.waveSocket, 2.5);
+  rr(ctx, win.x + 2, win.y + 2, win.w - 4, 5, 3);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.stroke();
+  if (bump > 0) {
+    rr(ctx, win.x, win.y, win.w, win.h, 11);
+    ctx.fillStyle = `rgba(255, 255, 255, ${bump * 0.3})`;
+    ctx.fill();
+  }
+  const s = String(value);
+  ctx.font = `28px ${FONT}`;
+  const size = clamp((28 * (win.w - 14)) / ctx.measureText(s).width, 14, 28);
+  bumpLabel(ctx, s, win.x + win.w / 2, cy + 1, size, bump, 'center');
+  return cy;
 }
 
 /** Linear gradient through the rainbow rim colours (or gold), turning with t. */
@@ -642,13 +660,11 @@ function waveDrawer(ctx: Ctx, b: Battle, left: number, bump: number, t: number, 
 }
 
 export function drawHud(ctx: Ctx, g: Game) {
-  pill(ctx, L.cash);
-  drawCash(ctx, L.cash.x + 20, L.cash.y + L.cash.h / 2, 1 + g.cashBump * 0.15);
-  bumpLabel(ctx, String(g.econ.cash), L.cash.x + 48, L.cash.y + L.cash.h / 2 + 1, 30, g.cashBump, 'left');
+  const cashY = currencyPill(ctx, L.cash, g.econ.cash, g.cashBump, 'left');
+  drawCash(ctx, L.cash.x + 22, cashY - 1, 0.86 + g.cashBump * 0.15); // the bills lean left: nudged in to sit inside the body
 
-  pill(ctx, L.gems);
-  bumpLabel(ctx, String(g.econ.gems), L.gems.x + 16, L.gems.y + L.gems.h / 2 + 1, 30, g.gemBump, 'left');
-  drawGem(ctx, L.gems.x + L.gems.w - 22, L.gems.y + L.gems.h / 2, 1.05 + g.gemBump * 0.15);
+  const gemY = currencyPill(ctx, L.gems, g.econ.gems, g.gemBump, 'right');
+  drawGem(ctx, L.gems.x + L.gems.w - 22, gemY, 1 + g.gemBump * 0.15);
 
   waveTracker(ctx, g.battle, g.time);
 
